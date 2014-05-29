@@ -41,6 +41,7 @@ class Docker::Container
   # Attach to a container's standard streams / logs.
   def attach(options = {}, &block)
     stdin = options.delete(:stdin)
+    tty   = options.delete(:tty)
 
     opts = {
       :stream => true, :stdout => true, :stderr => true
@@ -54,9 +55,9 @@ class Docker::Container
       # If attaching to stdin, we must hijack the underlying TCP connection
       # so we can stream stdin to the remote Docker process
       opts[:stdin] = true
-      excon_params[:hijack_block] = hijack_for(stdin, block, msgs)
+      excon_params[:hijack_block] = hijack_for(stdin, block, msgs, tty)
     else
-      excon_params[:response_block] = attach_for(block, msgs)
+      excon_params[:response_block] = attach_for(block, msgs, tty)
     end
 
     connection.post(
@@ -168,8 +169,8 @@ class Docker::Container
     "/containers/#{self.id}/#{resource}"
   end
 
-  def hijack_for(stdin, block, msg_stack)
-    attach_block = attach_for(block, msg_stack)
+  def hijack_for(stdin, block, msg_stack, tty = false)
+    attach_block = attach_for(block, msg_stack, tty)
 
     lambda do |socket|
       debug "hijack: hijacking the HTTP socket"
@@ -205,7 +206,9 @@ class Docker::Container
   end
 
   # Method that takes chunks and calls the attached block for each mux'd message
-  def attach_for(block, msg_stack)
+  def attach_for(block, msg_stack, tty = false)
+    return lambda { |c,r,t| block.call c } if tty
+
     messages = Docker::Messages.new
     lambda do |c,r,t|
       messages = messages.decipher_messages(c)
